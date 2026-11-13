@@ -27,10 +27,11 @@ jobs:
         uses: gradle/actions/setup-gradle@v4
 
       - name: Build CHEAT Client
-        run: chmod +x gradlew && ./gradlew build
+        run: chmod +x gradlew && ./gradlew --no-daemon clean build
 
       - name: Upload JAR
         uses: actions/upload-artifact@v4
         with:
           name: CHEAT-Fabric-1.21.11
           path: build/libs/*.jar
+          if-no-files-found: error

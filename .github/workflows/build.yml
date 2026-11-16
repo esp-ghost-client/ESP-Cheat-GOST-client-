@@ -22,7 +22,6 @@ jobs:
           G=$(find . -name build.gradle -not -path './.git/*' | head -n 1)
           if [ -z "$G" ]; then
             echo "build.gradle not found"
-            ls -R . | head -50
             exit 1
           fi
           echo "PROJECT_DIR=$(dirname "$G")" >> $GITHUB_ENV
@@ -34,7 +33,7 @@ jobs:
 
       - uses: gradle/actions/setup-gradle@v4
         with:
-          gradle-version: 9.2.0
+          gradle-version: 9.8.0
 
       - name: Build
         working-directory: ${{ env.PROJECT_DIR }}

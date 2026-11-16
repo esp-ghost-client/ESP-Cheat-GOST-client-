@@ -1,59 +1,46 @@
-name: Build ESP Ghost Client
-
+name: build
 on:
   push:
-  pull_request:
   workflow_dispatch:
-
 jobs:
   build:
     runs-on: ubuntu-latest
     steps:
-      - name: Checkout repository
-        uses: actions/checkout@v7
+      - uses: actions/checkout@v4
 
       - name: Unzip source if uploaded as zip
         run: |
-          if [ -f ESP-Ghost-Client-source.zip ]; then
-            unzip -q ESP-Ghost-Client-source.zip -d _src
+          if [ ! -f build.gradle ]; then
+            Z=$(find . -maxdepth 1 -name '*.zip' | head -n 1)
+            if [ -n "$Z" ]; then
+              unzip -o "$Z" -d src_unzipped
+            fi
           fi
-
-      - name: Set up Java 25
-        uses: actions/setup-java@v6
-        with:
-          java-version: "25"
-          distribution: "microsoft"
 
       - name: Find project folder
-        id: find
         run: |
-          F=$(find . -name gradlew -not -path './.git/*' | head -n 1)
-          if [ -z "$F" ]; then
-            echo "gradlew NOT FOUND. Files in repo:"
-            find . -maxdepth 3 -not -path './.git/*'
+          G=$(find . -name build.gradle -not -path './.git/*' | head -n 1)
+          if [ -z "$G" ]; then
+            echo "build.gradle not found"
+            ls -R . | head -50
             exit 1
           fi
-          DIR=$(dirname "$F")
-          echo "Project folder: $DIR"
-          echo "dir=$DIR" >> "$GITHUB_OUTPUT"
+          echo "PROJECT_DIR=$(dirname "$G")" >> $GITHUB_ENV
 
-      - name: Prepare gradlew
-        working-directory: ${{ steps.find.outputs.dir }}
-        run: |
-          sed -i 's/\r$//' gradlew
-          chmod +x gradlew
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: 21
 
-      - name: Setup Gradle
-        uses: gradle/actions/setup-gradle@v6
+      - uses: gradle/actions/setup-gradle@v4
+        with:
+          gradle-version: 9.2.0
 
       - name: Build
-        working-directory: ${{ steps.find.outputs.dir }}
-        run: ./gradlew build -x spotlessCheck --stacktrace
+        working-directory: ${{ env.PROJECT_DIR }}
+        run: gradle build --no-daemon
 
-      - name: Upload jar
-        uses: actions/upload-artifact@v7
+      - uses: actions/upload-artifact@v4
         with:
           name: ESP-Ghost-Client
-          path: |
-            ${{ steps.find.outputs.dir }}/build/libs/*.jar
-            !${{ steps.find.outputs.dir }}/build/libs/*-sources.jar
+          path: ${{ env.PROJECT_DIR }}/build/libs/ESP-Ghost-Client-MC1.21.11-v1.0-*.jar

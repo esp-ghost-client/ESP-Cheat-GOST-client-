@@ -1,57 +1,98 @@
-
-name: Build ESP Ghost Client
-
+name: build
 on:
   push:
   workflow_dispatch:
 
+permissions:
+  contents: write
+
 jobs:
   build:
     runs-on: ubuntu-latest
-
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - { dir: v1_21_4,  name: MC1.21.4 }
+          - { dir: v1_21_8,  name: MC1.21.8 }
+          - { dir: v1_21_11, name: MC1.21.11 }
+          - { dir: v26_3,    name: MC26.3 }
     steps:
-      - name: Checkout Source
-        uses: actions/checkout@v4
+      - uses: actions/checkout@v4
 
-      - name: Extract ZIP Source
+      - name: Unzip source if it was uploaded as a zip
         run: |
-          if ! find . -name build.gradle -o -name build.gradle.kts | grep -q .; then
-            Z=$(find . -maxdepth 2 -name '*.zip' | head -n 1)
+          if ! find . -path "*/${{ matrix.dir }}/build.gradle" -not -path './.git/*' | grep -q .; then
+            Z=$(find . -maxdepth 1 -name '*.zip' | head -n 1)
             if [ -n "$Z" ]; then
-              mkdir -p src_unzipped
               unzip -o "$Z" -d src_unzipped
             fi
           fi
 
-      - name: Setup Java
-        uses: actions/setup-java@v5
-        with:
-          distribution: temurin
-          java-version: '25'
-
-      - name: Find Gradle Project
+      - name: Find project folder
         run: |
-          G=$(find . \( -name build.gradle -o -name build.gradle.kts \) -not -path './.git/*' | head -n 1)
-
+          G=$(find . -path "*/${{ matrix.dir }}/build.gradle" -not -path './.git/*' | head -n 1)
           if [ -z "$G" ]; then
-            echo "ERROR: build.gradle not found!"
+            echo "project folder ${{ matrix.dir }} not found"
+            ls -R . | head -60
             exit 1
           fi
-
           echo "PROJECT_DIR=$(dirname "$G")" >> $GITHUB_ENV
 
-      - name: Setup Gradle
-        uses: gradle/actions/setup-gradle@v4
+      - uses: actions/setup-java@v4
         with:
-          gradle-version: '9.8.0'
+          distribution: temurin
+          java-version: 25
 
-      - name: Build
+      - uses: gradle/actions/setup-gradle@v4
+        with:
+          gradle-version: 9.8.0
+
+      - name: Build menu addon
         working-directory: ${{ env.PROJECT_DIR }}
-        run: gradle clean build --no-daemon
+        run: gradle build --no-daemon
 
-      - name: Upload JAR
-        uses: actions/upload-artifact@v4
+      - name: Merge menu into the ESP jar and pack with Fabric API
+        working-directory: ${{ env.PROJECT_DIR }}
+        run: |
+          ADDON=$(ls build/libs/*.jar | grep -v -E 'sources|dev' | head -n 1)
+          echo "addon jar: $ADDON"
+          rm -rf merged final pack && mkdir merged final pack
+          cd merged
+          unzip -q ../libs/esp-ghost-client.jar
+          unzip -q -o "../$ADDON" 'bloodystar/*'
+          python3 - <<'PY'
+          import json
+          d = json.load(open('fabric.mod.json'))
+          d.setdefault('entrypoints', {})['client'] = ['bloodystar.espmenu.EspMenuMod']
+          json.dump(d, open('fabric.mod.json', 'w'), indent=2)
+          PY
+          zip -q -X -r "../pack/ESP-Ghost-Client-${{ matrix.name }}-v1.0.jar" .
+          cd ..
+          cp fabric/*.jar pack/
+          cd pack
+          zip -q -X "../final/ESP-Ghost-Client-${{ matrix.name }}.zip" *.jar
+          unzip -l "../final/ESP-Ghost-Client-${{ matrix.name }}.zip"
+
+      - uses: actions/upload-artifact@v4
         with:
-          name: ESP-Ghost-Client-Java21
-          path: ${{ env.PROJECT_DIR }}/build/libs/*.jar
-          if-no-files-found: error
+          name: zip-${{ matrix.name }}
+          path: ${{ env.PROJECT_DIR }}/final/*.zip
+
+  release:
+    needs: build
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          path: dist
+          pattern: zip-*
+          merge-multiple: true
+
+      - name: Publish public release (fixed tag "latest")
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          ls -la dist
+          gh release delete latest --repo "${{ github.repository }}" --yes --cleanup-tag || true
+          gh release create latest dist/*.zip --repo "${{ github.repository }}" --title "ESP Ghost Client - latest" --notes "Each zip has the client jar + the matching Fabric API jar. Put both jars in your mods folder." --latest
